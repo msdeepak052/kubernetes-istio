@@ -160,4 +160,304 @@ Service Mesh usually comes with telemetry out-of-the-box:
 
 ---
 
-Let me know if you want a hands-on Istio demo YAML with a sample app setup 🔥🔨🤖🔧
+Awesome! Let's roll out a **hands-on Istio example** in a Kubernetes cluster 🚀
+
+---
+
+## 🎯 Goal:
+
+Deploy a **sample app** with Istio that includes:
+
+* ✅ `frontend` calling `backend`
+* ✅ Canary deployment on `backend` v1 and v2
+* ✅ Istio traffic routing
+* ✅ Sidecar injection
+* ✅ mTLS, observability ready
+
+---
+
+## ✅ 1. Prerequisites
+
+* Kubernetes cluster (Minikube, kind, GKE, etc.)
+* `kubectl`
+* `istioctl` installed
+* Istio installed in your cluster (`istioctl install`)
+
+---
+
+## 📁 2. Project Structure
+
+```
+istio-demo/
+├── k8s/
+│   ├── namespace.yaml
+│   ├── frontend-deployment.yaml
+│   ├── backend-v1-deployment.yaml
+│   ├── backend-v2-deployment.yaml
+│   ├── service.yaml
+├── istio/
+│   ├── gateway.yaml
+│   ├── virtualservice.yaml
+│   ├── destinationrule.yaml
+```
+
+---
+
+## 🧾 3. YAML Manifests
+
+### 🧩 `namespace.yaml`
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+  labels:
+    istio-injection: enabled
+```
+
+---
+
+### 🖥️ `frontend-deployment.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: frontend
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      containers:
+      - name: frontend
+        image: hashicorp/http-echo
+        args:
+        - "-text=Hello from frontend"
+        ports:
+        - containerPort: 5678
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: demo
+spec:
+  selector:
+    app: frontend
+  ports:
+  - port: 80
+    targetPort: 5678
+```
+
+---
+
+### 🔁 `backend-v1-deployment.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-v1
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: backend
+        version: v1
+    spec:
+      containers:
+      - name: backend
+        image: hashicorp/http-echo
+        args: ["-text=Hello from backend v1"]
+        ports:
+        - containerPort: 5678
+```
+
+---
+
+### 🔁 `backend-v2-deployment.yaml`
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend-v2
+  namespace: demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: backend
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: backend
+        version: v2
+    spec:
+      containers:
+      - name: backend
+        image: hashicorp/http-echo
+        args: ["-text=Hello from backend v2"]
+        ports:
+        - containerPort: 5678
+```
+
+---
+
+### 🛰️ `service.yaml` (for backend)
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: demo
+spec:
+  selector:
+    app: backend
+  ports:
+  - port: 80
+    targetPort: 5678
+```
+
+---
+
+## 🔀 4. Istio Configs
+
+### 🌐 `gateway.yaml`
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: Gateway
+metadata:
+  name: demo-gateway
+  namespace: demo
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+  - port:
+      number: 80
+      name: http
+      protocol: HTTP
+    hosts:
+    - "*"
+```
+
+---
+
+### 🎯 `virtualservice.yaml`
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: VirtualService
+metadata:
+  name: backend
+  namespace: demo
+spec:
+  hosts:
+  - backend
+  http:
+  - route:
+    - destination:
+        host: backend
+        subset: v1
+      weight: 80
+    - destination:
+        host: backend
+        subset: v2
+      weight: 20
+```
+
+---
+
+### 🎯 `destinationrule.yaml`
+
+```yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: backend
+  namespace: demo
+spec:
+  host: backend
+  subsets:
+  - name: v1
+    labels:
+      version: v1
+  - name: v2
+    labels:
+      version: v2
+```
+
+---
+
+## 🚀 5. Deploy Everything
+
+```bash
+# Create namespace with injection
+kubectl apply -f k8s/namespace.yaml
+
+# Deploy services
+kubectl apply -f k8s/frontend-deployment.yaml
+kubectl apply -f k8s/backend-v1-deployment.yaml
+kubectl apply -f k8s/backend-v2-deployment.yaml
+kubectl apply -f k8s/service.yaml
+
+# Apply Istio configs
+kubectl apply -f istio/gateway.yaml
+kubectl apply -f istio/virtualservice.yaml
+kubectl apply -f istio/destinationrule.yaml
+```
+
+---
+
+## 🌐 6. Access the App
+
+```bash
+kubectl get svc istio-ingressgateway -n istio-system
+```
+
+Grab the **EXTERNAL-IP** (or use `minikube service istio-ingressgateway -n istio-system` if using minikube), and hit:
+
+```
+http://<INGRESS-IP>/ (optional route)
+```
+
+You should see:
+
+* Sometimes: "Hello from backend v1"
+* Sometimes: "Hello from backend v2"
+
+According to 80/20 split 🎯
+
+---
+
+## 📊 7. Observability (Bonus)
+
+Install these addons if needed:
+
+```bash
+istioctl dashboard kiali
+istioctl dashboard prometheus
+istioctl dashboard jaeger
+```
+
+---
+
+
